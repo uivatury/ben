@@ -6,9 +6,10 @@ to diagnose claim evaluation issues.
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
 
-from ddsolver import ddsolver
+from src.ddsolver import ddsolver
 
 def test_position(test_name, pbn_string, trump, leader, expected_tricks):
     """Test a single position with DDS"""
