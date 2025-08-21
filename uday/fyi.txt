@@ -1,0 +1,117 @@
+
+
+(base) uday@uim1 ben % python uday/bidding_inference.py "AQ1098.K3.752.A94" models/TF2models/BEN-21GF-8730_2025-04-18-E30.keras --seat S --vuln "NS" --dealer N --auction "1N P"
+
+
+--
+
+  Current Options:
+
+  1. Default (no flags): Human-readable output (basic)
+  2. --verbose: Human-readable output with extra details (confidence analysis, entropy, timing)
+  3. --json: JSON output only (no human text)
+  4. --json --verbose: JSON output with extra data (all 40 bid probabilities)
+
+  So --verbose is NOT the default - it adds extra information to whichever output format you're using.
+
+  Examples:
+
+  # Default - Basic human output
+  python uday/bidding_inference.py "AKQJ32.A32.432.2" models/TF2models/BEN-21GF-8730_2025-04-18-E30.keras
+
+  # Output:
+  Recommended bid: 1S (100.0%)
+  Top 5 bid options:
+    1. 1S    - 100.0%
+    2. 2S    - 0.0%
+    ...
+
+  # Verbose - Detailed human output
+  python uday/bidding_inference.py "AKQJ32.A32.432.2" models/TF2models/BEN-21GF-8730_2025-04-18-E30.keras --verbose
+
+  # Output (adds):
+  Confidence Analysis:
+    Max probability: 100.0%
+    Top 5 total: 100.0%
+    Entropy: 0.00
+    Inference time: 0.194 seconds
+
+  # JSON - Structured output
+  python uday/bidding_inference.py "AKQJ32.A32.432.2" models/TF2models/BEN-21GF-8730_2025-04-18-E30.keras --json
+
+  # Output: Clean JSON only
+
+  # JSON + Verbose - JSON with all bid probabilities
+  python uday/bidding_inference.py "AKQJ32.A32.432.2" models/TF2models/BEN-21GF-8730_2025-04-18-E30.keras --json --verbose
+
+  # Output: JSON with "all_bids" field containing all 40 probabilities
+
+
+---
+
+ Available Bidding Models:
+
+⏺ List(models/TF2models)
+  ⎿  Listed 39 paths (ctrl+r to expand)
+
+⏺ Available Bidding Models (use these for the model parameter):
+
+  SAYC System Models:
+
+  - models/TF2models/BEN-Sayc-8730_2025-04-20-E30.keras
+  - models/TF2models/BlueChip-Sayc-8712_2024-11-29-E25.keras
+  - models/TF2models/Robo-Sayc-8730_2025-05-07-E30.keras
+  - models/TF2models/Shark-Sayc-8730_2025-04-21-E30.keras
+  - models/TF2models/WBridge5-Sayc-8730_2025-04-20-E30.keras
+
+  2/1 Game Force Models:
+
+  - models/TF2models/BEN-21GF-8730_2025-04-18-E30.keras
+  - models/TF2models/LIA-21GF-8730_2025-04-19-E30.keras
+  - models/TF2models/QPlus-21GF-8730_2025-04-21-E30.keras
+
+  Other Systems:
+
+  - models/TF2models/GIB-BBO-8730_2025-04-19-E30.keras (GIB BBO system)
+
+  Bidding Information Models (for hand evaluation, not direct bidding):
+
+  - All models ending with -Info- (e.g., BEN-Sayc-Info-, BEN-21GF-Info-, etc.)
+
+  Note: The other models (Contract, Tricks, Lead, playing models like decl_, dummy_, etc.) are for different phases of the game, not bidding.
+
+  Most popular for testing:
+  - SAYC: BEN-Sayc-8730_2025-04-20-E30.keras
+  - 2/1 GF: BEN-21GF-8730_2025-04-18-E30.keras
+
+
+
+---
+
+⏺ Here are single-line samples for each bridge scenario:
+
+  Opening Lead (West leads against North's 3NT):
+
+  python uday/play_inference.py "AKQ5.J1094.862.73" "3NT" --position W --declarer-position N --opening-lead --auction "1NT PASS 3NT PASS PASS PASS"
+
+  Declarer Play to Trick 1 from Dummy (North plays from dummy after West's lead):
+
+  python uday/play_inference.py "8642.AKQ.KQJ4.A5" "3NT" --position N --declarer-position N --dummy-hand "KJ93.8765.A103.K2" --current-trick "C7" --auction "1NT PASS 3NT PASS PASS PASS"
+
+  Third Hand Play to Trick 1 (East plays third to West's lead):
+
+  python uday/play_inference.py "1097.32.9875.QJ84" "3NT" --position E --declarer-position N --dummy-hand "KJ93.8765.A103.K2" --current-trick "C7 C2" --auction "1NT PASS 3NT PASS PASS PASS"
+
+  Declarer Play to Trick 1 from Hand (South completes trick 1):
+
+  python uday/play_inference.py "AQ.QJ.QJ52.109765" "3NT" --position S --declarer-position N --dummy-hand "KJ93.8765.A103.K2" --current-trick "C7 C2 CQ" --auction "1NT PASS 3NT PASS PASS PASS"
+
+  Trick 2 (East won trick 1 and leads trick 2):
+
+  python uday/play_inference.py "1097.32.9875.J84" "3NT" --position E --declarer-position N --dummy-hand "KJ93.8765.A103.K2" --tricks-played "C7 C2 CQ CK" --auction "1NT PASS 3NT PASS PASS PASS"
+
+  Key Pattern Changes:
+  - --current-trick gets longer as more players contribute to the current trick
+  - --tricks-played accumulates completed tricks (groups of 4 cards)
+  - Hands get updated to reflect cards already played (note: C7, CK, CQ removed in trick 2 example)
+  - Model auto-selection: lefty → dummy → righty → decl → righty (for trick 2 leader)

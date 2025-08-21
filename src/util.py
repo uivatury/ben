@@ -118,20 +118,45 @@ def follow_suit(cards_softmax, own_cards, trick_suit, n_cards=32):
     assert trick_suit.shape[0] == cards_softmax.shape[0]
     assert cards_softmax.shape[0] == own_cards.shape[0]
 
+    # DEBUG: Check if this is an opening lead call (trick_suit all zeros)
+    is_opening_lead = np.max(trick_suit) == 0
+    if is_opening_lead:
+        print(f"DEBUG follow_suit: Opening lead detected (trick_suit all zeros)")
+        print(f"DEBUG follow_suit: Input cards_softmax shape: {cards_softmax.shape}")
+        print(f"DEBUG follow_suit: Input own_cards shape: {own_cards.shape}")
+        print(f"DEBUG follow_suit: Cards in hand indices: {np.where(own_cards[0] > 0)[0]}")
+
     suit_defined = np.max(trick_suit, axis=1) > 0
     trick_suit_i = np.argmax(trick_suit, axis=1)
 
     mask = (own_cards > 0).astype(np.int32)
+    
+    if is_opening_lead:
+        print(f"DEBUG follow_suit: Mask (cards in hand): {np.where(mask[0] > 0)[0]}")
 
     has_cards_of_suit = np.sum(mask * SUIT_MASK[trick_suit_i], axis=1) > 1e-9
 
     mask[suit_defined & has_cards_of_suit] *= SUIT_MASK[trick_suit_i[suit_defined & has_cards_of_suit]]
 
     legal_cards_softmax = cards_softmax * mask
+    
+    if is_opening_lead:
+        print(f"DEBUG follow_suit: Non-zero legal cards after masking: {np.where(legal_cards_softmax[0] > 1e-9)[0]}")
+        print(f"DEBUG follow_suit: Legal cards softmax sum: {np.sum(legal_cards_softmax[0])}")
 
     s = np.sum(legal_cards_softmax, axis=1, keepdims=True)
     s[s < 1e-9] = 1
-    return legal_cards_softmax / s
+    
+    if is_opening_lead:
+        print(f"DEBUG follow_suit: Normalization sum: {s[0][0]}")
+        
+    result = legal_cards_softmax / s
+    
+    if is_opening_lead:
+        print(f"DEBUG follow_suit: Final result sum: {np.sum(result[0])}")
+        print(f"DEBUG follow_suit: Non-zero final scores: {np.where(result[0] > 1e-9)[0]}")
+    
+    return result
 
 def calculate_seed(input):
     # Calculate the SHA-256 hash

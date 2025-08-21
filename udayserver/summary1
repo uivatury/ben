@@ -1,0 +1,95 @@
+● BEN Bridge Engine Development Summary
+
+  Current Project Status
+
+  Objective: Performance optimization and compatibility improvements for the BEN bridge engine, specifically focusing on model
+  inference speed and configuration flexibility.
+
+  Recent Key Changes
+
+  1. Single Dummy Lead Model Optimization (src/botopeninglead.py:413)
+
+  - Issue: Incompatibility between 24-card bidding models and 32-card single dummy (SD) models
+  - Solution: Added automatic format conversion logic
+  - Impact: Enables using faster 24-card bidding models with existing 32-card SD models
+  - Code: Converts hands from 24-card to 32-card format using deck52.handxxto52str() and binary.parse_hand_f(32)()
+
+  2. TensorFlow Performance Optimization (src/nn/lead_singledummy_tf2.py:14)
+
+  - Issue: Slow model inference due to model.predict() overhead
+  - Solution: Direct model calls using model(x, training=False)
+  - Impact: ~2-3x faster inference for single dummy lead evaluation
+  - Removed: @tf.function decorator that was causing compilation delays
+
+  3. API Server Architecture Changes (src/gameapi.py:3)
+
+  - Issue: Thread safety problems with gevent and TensorFlow
+  - Solution: Removed gevent monkey patching, added TF thread limiting
+  - Configuration: Limited TF to 1 inter/intra-op thread to prevent contention
+  - Deployment: Switched from gevent WSGIServer to Flask dev server (with gunicorn recommendation)
+
+  4. Configuration Strategy Shift
+
+  - Previous: Full production configuration with extensive search and sampling
+  - Current: Minimal search configuration for speed optimization
+  - Active Config: minimal_search_api.conf (vs production_api.conf)
+  - Key Changes:
+    - Search thresholds: 0.90 (effectively disabled vs 0.10-0.03)
+    - Sampling: 10 hands (vs 100 hands)
+    - Double dummy: disabled (vs enabled)
+    - PIMC: disabled (vs enabled)
+
+  Testing Framework
+
+  Match Scripts
+
+  - Primary: match.sh - Runs bidding comparisons between two configurations
+  - Recent Tests: uday.1.match.sh comparing GIB-BBO vs BEN-21GF models
+  - Pipeline: auction.py → lead.py → score.py → compare.py → results
+
+  Current Comparison (A.conf vs B.conf)
+
+  - A.conf: GIB-BBO models with minimal_search_api config
+  - B.conf: BEN-21GF models with minimal_search_api config
+  - Test Set: 100 random boards (uday_random_100.txt)
+  - Results: Available in multiple format files (HTML, TXT, minimal variants)
+
+  Model Architecture Details
+
+  Bidding Models (24-card format)
+
+  - GIB-BBO: GIB-BBO-8730_2025-04-19-E30.keras
+  - BEN-21GF: BEN-21GF-8730_2025-04-18-E30.keras
+  - Format: AKQJTx (pips grouped)
+
+  Lead Models (32-card format)
+
+  - Suit: Lead-Suit_2024-11-04-E200.keras
+  - NT: Lead-NT_2024-11-04-E200.keras
+  - SD Estimator: SD_2024-07-08-E20.keras
+
+  Performance Profile
+
+  Current Focus: Speed over accuracy for rapid testing
+  - Minimal sampling (10 vs 100 hands)
+  - No double dummy calculations
+  - Direct neural network outputs preferred
+  - Single dummy evaluation only
+
+  Key Files Modified
+
+  1. src/botopeninglead.py - Format conversion logic
+  2. src/gameapi.py - Server architecture and threading
+  3. src/nn/lead_singledummy_tf2.py - TF optimization
+  4. scripts/match/bidding/match.sh - Testing pipeline
+  5. Config files: A.conf, B.conf (test configurations)
+
+  Next Steps Likely
+
+  - Compare performance metrics from recent matches
+  - Validate 24→32 card conversion accuracy
+  - Fine-tune minimal config parameters
+  - Scale testing to larger board sets
+  - Consider production deployment of optimized config
+
+  This summary provides the context needed to continue development work on the BEN engine's performance optimization efforts

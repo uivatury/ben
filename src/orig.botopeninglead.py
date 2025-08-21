@@ -180,25 +180,25 @@ class BotLead:
                 # expected_tricks_sd is for declarer
                 if self.models.use_real_imp_or_mp_opening_lead:
                     if self.models.matchpoint:
-                        candidate_cards = sorted(candidate_cards, key=lambda c: (c.expected_score_mp if c.expected_score_mp is not None else 0, round(c.insta_score, 2)), reverse=True)
+                        candidate_cards = sorted(candidate_cards, key=lambda c: (c.expected_score_mp, round(c.insta_score, 2)), reverse=True)
                         who = "Simulation (MP)"
                     else:
-                        candidate_cards = sorted(candidate_cards, key=lambda c: (c.expected_score_imp if c.expected_score_imp is not None else 0, round(c.insta_score, 2)), reverse=True)
+                        candidate_cards = sorted(candidate_cards, key=lambda c: (c.expected_score_imp, round(c.insta_score, 2)), reverse=True)
                         who = "Simulation (IMP)"
                 else:
                     if self.models.double_dummy:                    
                         if self.models.matchpoint:
-                            candidate_cards = sorted(candidate_cards, key=lambda c: (-round(c.expected_tricks_dd, 1) if c.expected_tricks_dd is not None else 0, round(c.insta_score, 2)), reverse=True)
+                            candidate_cards = sorted(candidate_cards, key=lambda c: (-round(c.expected_tricks_dd, 1), round(c.insta_score, 2)), reverse=True)
                             who = "Simulation (Tricks DD)"
                         else:
-                            candidate_cards = sorted(candidate_cards, key=lambda c: (round(5*c.p_make_contract, 1) if c.p_make_contract is not None else 0, -round(c.expected_tricks_dd, 1) if c.expected_tricks_dd is not None else 0, round(c.insta_score, 2)), reverse=True)
+                            candidate_cards = sorted(candidate_cards, key=lambda c: (round(5*c.p_make_contract, 1), -round(c.expected_tricks_dd, 1), round(c.insta_score, 2)), reverse=True)
                             who = "Simulation (make/set DD)"
                     else:
                         if self.models.matchpoint:
-                            candidate_cards = sorted(candidate_cards, key=lambda c: (-round(c.expected_tricks_sd, 1) if c.expected_tricks_sd is not None else 0, round(c.insta_score, 2)), reverse=True)
+                            candidate_cards = sorted(candidate_cards, key=lambda c: (-round(c.expected_tricks_sd, 1), round(c.insta_score, 2)), reverse=True)
                             who = "Simulation (Tricks SD)"
                         else:
-                            candidate_cards = sorted(candidate_cards, key=lambda c: (round(5*c.p_make_contract, 1) if c.p_make_contract is not None else 0, -round(c.expected_tricks_sd, 1) if c.expected_tricks_sd is not None else 0, round(c.insta_score, 2)), reverse=True)
+                            candidate_cards = sorted(candidate_cards, key=lambda c: (round(5*c.p_make_contract, 1), -round(c.expected_tricks_sd, 1), round(c.insta_score, 2)), reverse=True)
                             who = "Simulation (make/set SD)"
                 opening_lead = candidate_cards[0].card.code()
 
@@ -284,34 +284,8 @@ class BotLead:
         else:
             lead_softmax = self.models.lead_suit_model.pred_fun(x_ftrs, b_ftrs)
 
-        # DEBUG: Print raw NN scores before filtering
-        if self.verbose:
-            print(f"DEBUG: Hand string: {self.hand_str}")
-            print(f"DEBUG: Hand binary representation shape: {self.handplay.shape}")
-            print(f"DEBUG: Raw NN softmax shape: {lead_softmax.shape}")
-            print("DEBUG: Raw NN scores for all cards:")
-            for i in range(lead_softmax.shape[1]):
-                card = Card.from_code(int(i), xcards=True)
-                score = lead_softmax[0][i]
-                print(f"  {card}: {score:.6f}")
-            
-            print(f"DEBUG: Cards in hand (handplay binary):")
-            for i in range(self.handplay.shape[1]):
-                if self.handplay[0][i] > 0:
-                    card = Card.from_code(int(i), xcards=True)
-                    print(f"  {card}: {self.handplay[0][i]}")
-
         # We remove all cards suggested by NN not in hand, and rescale the softmax
         lead_softmax = follow_suit(lead_softmax, self.handplay, np.array([[0, 0, 0, 0]]))
-
-        # DEBUG: Print filtered scores
-        if self.verbose:
-            print("DEBUG: Filtered NN scores after follow_suit:")
-            for i in range(lead_softmax.shape[1]):
-                card = Card.from_code(int(i), xcards=True)
-                score = lead_softmax[0][i]
-                if score > 1e-9:  # Only print non-zero scores
-                    print(f"  {card}: {score:.6f}")
 
         candidates = []
         # Make a copy of the lead_softmax array
@@ -322,42 +296,11 @@ class BotLead:
         while True:
             c = np.argmax(lead_softmax_copy[0])
             score = lead_softmax_copy[0][c]
-            card = Card.from_code(int(c), xcards=True)
-            
-            if self.verbose:
-                print(f"DEBUG: Considering card {card} (index {c}) with score {score:.6f}")
-                print(f"DEBUG: Threshold: {self.models.lead_threshold}, Min leads: {self.models.min_opening_leads}, Current candidates: {len(candidates)}")
-            
-            # CRITICAL BUG FIX: Validate card is actually in hand before adding to candidates
-            if self.handplay[0][c] <= 0:
-                if self.verbose:
-                    print(f"WARNING: Card {card} (index {c}) is NOT in hand! handplay[{c}] = {self.handplay[0][c]} - skipping")
-                lead_softmax_copy[0][c] = 0  # Zero out invalid card
-                
-                # Check if we have any valid cards left
-                if np.max(lead_softmax_copy[0]) <= 1e-9:
-                    if self.verbose:
-                        print("ERROR: No valid cards remaining! Neural network failed - adding ALL cards in hand for simulation")
-                    # Fallback: add ALL cards in hand as candidates for simulation to evaluate
-                    valid_indices = np.where(self.handplay[0] > 0)[0]
-                    if len(valid_indices) > 0:
-                        for idx in valid_indices:
-                            card = Card.from_code(int(idx), xcards=True)
-                            if self.verbose:
-                                print(f"FALLBACK: Adding {card} to candidates for simulation")
-                            candidates.append(idx)
-                    break
-                continue  # Try next highest card
-            
             # Always take minimum the number from configuration
             if score < self.models.lead_threshold and len(candidates) >= self.models.min_opening_leads:
-                if self.verbose:
-                    print(f"DEBUG: Breaking - score {score:.6f} < threshold {self.models.lead_threshold} and have {len(candidates)} >= {self.models.min_opening_leads} candidates")
                 break
-                
             if self.verbose:
-                print(f"{card} {score:.3f}")
-                    
+                print(f"{Card.from_code(int(c), xcards=True)} {score:.3f}")
             candidates.append(c)
             lead_softmax_copy[0][c] = 0
         
@@ -470,25 +413,14 @@ class BotLead:
         strain_i = bidding.get_strain_i(contract)
 
         X_sd[:,32 + strain_i] = 1
-        
-        # Convert hands to 32-card format if needed (SD model expects 32-card hands)
-        if self.models.n_cards_bidding == 24:
-            # Convert our hand from 24-card to 32-card format
-            hand_32 = binary.parse_hand_f(32)(deck52.handxxto52str(self.handbidding, 24))
-            X_sd[:,(32 + 5 + 0*32):(32 + 5 + 1*32)] = hand_32.reshape(32)
-            
-            # Convert sampled hands from 24-card to 32-card format
-            for i in range(n_accepted):
-                for j in range(3):  # dummy, righty, declarer
-                    hand_24 = accepted_samples[i, j, :]
-                    hand_32 = binary.parse_hand_f(32)(deck52.handxxto52str(hand_24, 24))
-                    X_sd[i, (32 + 5 + (j+1)*32):(32 + 5 + (j+2)*32)] = hand_32
-        else:
-            # Use original logic for 32-card models
-            X_sd[:,(32 + 5 + 0*32):(32 + 5 + 1*32)] = self.handbidding.reshape(32)
-            X_sd[:,(32 + 5 + 1*32):(32 + 5 + 2*32)] = accepted_samples[:,0,:].reshape((n_accepted, 32))
-            X_sd[:,(32 + 5 + 2*32):(32 + 5 + 3*32)] = accepted_samples[:,1,:].reshape((n_accepted, 32))
-            X_sd[:,(32 + 5 + 3*32):] = accepted_samples[:,2,:].reshape((n_accepted, 32))
+        # lefty (That is us)
+        X_sd[:,(32 + 5 + 0*32):(32 + 5 + 1*32)] = self.handbidding.reshape(32)
+        # dummy
+        X_sd[:,(32 + 5 + 1*32):(32 + 5 + 2*32)] = accepted_samples[:,0,:].reshape((n_accepted, 32))
+        # righty
+        X_sd[:,(32 + 5 + 2*32):(32 + 5 + 3*32)] = accepted_samples[:,1,:].reshape((n_accepted, 32))
+        # declarer
+        X_sd[:,(32 + 5 + 3*32):] = accepted_samples[:,2,:].reshape((n_accepted, 32))
 
         tricks = np.zeros((n_accepted, len(lead_card_indexes), 2))
 

@@ -11,13 +11,13 @@ class LeadSingleDummy:
     def load_model(self):
         return load_model(self.model_path, compile=False)
 
+    @tf.function(input_signature=[tf.TensorSpec(shape=[None, None, 298], dtype=tf.float16)])
     def pred_fun_tf(self, x):
-        result = self.model(x, training=False)
+        result = self.model.predict(x,verbose=0)
         return result
 
 
     def pred_fun(self, x):
-        x = tf.convert_to_tensor(x, dtype=tf.float16)
         result = self.pred_fun_tf(x)
         return result.numpy()
 

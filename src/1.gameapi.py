@@ -1,8 +1,7 @@
 import faulthandler
 faulthandler.enable()
-# Removed gevent monkey patching for thread safety
-# from gevent import monkey
-# monkey.patch_all()
+from gevent import monkey
+monkey.patch_all()
 import gc
 import os
 import sys
@@ -31,13 +30,9 @@ absl.logging.set_verbosity(absl.logging.FATAL)
 absl.logging.set_stderrthreshold(absl.logging.FATAL)
 
 import tensorflow as tf
-# Limit TF threads to prevent contention when using multiple workers
-tf.config.threading.set_inter_op_parallelism_threads(1)
-tf.config.threading.set_intra_op_parallelism_threads(1)
 import psutil
 
-# Removed gevent WSGIServer - using Flask's built-in or gunicorn instead
-# from gevent.pywsgi import WSGIServer
+from gevent.pywsgi import WSGIServer
 import datetime 
 import time
 
@@ -101,7 +96,7 @@ def get_execution_path():
     # Get the directory where the program is started from either PyInstaller executable or the script
     return os.getcwd()
 
-def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strain_i, decl_i, auction, play, cardplayer_i, claim, features, verbose, claimer_position_i=None):
+def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strain_i, decl_i, auction, play, cardplayer_i, claim, features, verbose):
     
     level = int(contract[0])
     is_decl_vuln = [vuln_ns, vuln_ew, vuln_ns, vuln_ew][decl_i]
@@ -164,9 +159,7 @@ def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strai
     current_trick = [opening_lead]
     current_trick52 = [opening_lead52]
 
-    # Only subtract from known hands, not from unknown hands ('...')
-    if lefty_hand_str != '...':
-        card_players[0].hand52[opening_lead52] -= 1
+    card_players[0].hand52[opening_lead52] -= 1
     card_i = 0
     deck = x = np.ones((52))
     for trick_i in range(13):
@@ -191,143 +184,33 @@ def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strai
             if card_i >= len(play):
                 if claim:
                     claimer = Claimer(verbose, dds)
-                    # For partial hands, we need a different approach to find hidden cards
-                    # Start with a full deck
-                    full_deck = np.ones(52)
-                    
-                    # Remove cards from the original partial hands (before play)
-                    # Parse the original hand strings to get initial cards
-                    import binary
-                    parse_hand = binary.parse_hand_f(52)
-                    original_hands = [
-                        parse_hand(lefty_hand_str).reshape(52) if lefty_hand_str != '...' else np.zeros(52),
-                        parse_hand(dummy_hand_str).reshape(52) if dummy_hand_str != '...' else np.zeros(52),
-                        parse_hand(righty_hand_str).reshape(52) if righty_hand_str != '...' else np.zeros(52),
-                        parse_hand(decl_hand_str).reshape(52) if decl_hand_str != '...' else np.zeros(52)
-                    ]
-                    
-                    # Remove original hand cards from full deck
-                    for hand in original_hands:
-                        full_deck -= hand
-                    
-                    # Remove all played cards from the deck
-                    for trick in tricks52:
-                        for card in trick:
-                            full_deck[card] = 0
-                    
-                    # Remove current trick cards
-                    for card in current_trick52:
-                        full_deck[card] = 0
-                    
-                    # What remains is the hidden cards
-                    hidden_cards = full_deck
-                    
-                    # Note: current_trick cards are already handled by deck tracking
-                    
-                    if verbose:
-                        hand_counts = [np.sum(card_players[j].hand52) for j in range(4)]
-                        total_known = sum(hand_counts) + len(current_trick52)
-                        total_hidden = np.sum(hidden_cards)
-                        deck_available = np.sum(deck)
-                        print(f"CLAIM DEBUG: Hand counts: {hand_counts} (total: {sum(hand_counts)})")
-                        print(f"CLAIM DEBUG: Current trick: {len(current_trick52)} cards")
-                        print(f"CLAIM DEBUG: Hidden cards: {total_hidden}")
-                        print(f"CLAIM DEBUG: Deck available: {deck_available}")
-                        print(f"CLAIM DEBUG: Total: {total_known+total_hidden} (should be 52)")
-                        print(f"CLAIM DEBUG: Current trick contains: {[deck52.decode_card(c) for c in current_trick52]}")
-                        print(f"CLAIM DEBUG: Total played cards so far: {card_i} out of {len(play)}")
-                        print(f"CLAIM DEBUG: Trick {trick_i}, Player {player_i}, Leader {leader_i}")
-                        
+                    for i in range(52):
+                        if deck[i] != 0: 
+                            for j in range(4):
+                                if card_players[j].hand52[i] != 0:
+                                  deck[i] -= 1  
                     #We need to find the missing cards and distribute between the 2 hidden hands
-                    # Use claimer_position_i if provided for claims, otherwise use current player_i for regular play
-                    if claimer_position_i is not None:
-                        # Convert board position to CardPlayer position
-                        # CardPlayer mapping: 0=lefty, 1=dummy, 2=righty, 3=declarer (relative to declarer)
-                        if claimer_position_i == decl_i:
-                            actual_claimer_i = 3  # declarer
-                        elif claimer_position_i == (decl_i + 2) % 4:
-                            actual_claimer_i = 1  # dummy
-                        elif claimer_position_i == (decl_i + 1) % 4:
-                            actual_claimer_i = 0  # lefty
-                        else:  # claimer_position_i == (decl_i + 3) % 4
-                            actual_claimer_i = 2  # righty
-                    else:
-                        actual_claimer_i = player_i
-                    
-                    # Count tricks already won by the claiming side
-                    # trick_won_by contains play order positions where opening leader is position 0
-                    # We need to identify which play order positions belong to declaring side
-                    # Opening leader is at NESW position (decl_i + 1) % 4
-                    opening_leader_nesw = (decl_i + 1) % 4
-                    
-                    # Create dynamic mapping from NESW to play order based on actual opening leader
-                    # Play order: 0=opening_leader, 1=next, 2=next, 3=next
-                    nesw_to_play_order = {}
-                    for i in range(4):
-                        nesw_pos = (opening_leader_nesw + i) % 4
-                        nesw_to_play_order[nesw_pos] = i
-                    
-                    declarer_play_pos = nesw_to_play_order[decl_i]
-                    dummy_play_pos = nesw_to_play_order[(decl_i + 2) % 4]
-                    
-                    declaring_side_positions = [declarer_play_pos, dummy_play_pos]  # declarer and dummy in play order
-                    defending_side_positions = [pos for pos in range(4) if pos not in declaring_side_positions]  # defenders
-                    
-                    tricks_won_by_declarer_side = sum(1 for winner in trick_won_by if winner in declaring_side_positions)
-                    tricks_won_by_defender_side = sum(1 for winner in trick_won_by if winner in defending_side_positions)
-                    
-                    # Determine if claimer is on declaring side
-                    claimer_is_declaring = (actual_claimer_i == 3) or (actual_claimer_i == 1)
-                    
-                    # Calculate tricks already won by claiming side
-                    if claimer_is_declaring:
-                        tricks_already_won = tricks_won_by_declarer_side
-                    else:
-                        tricks_already_won = tricks_won_by_defender_side
-                    
-                    # The claim is for total tricks, but we need to check remaining tricks needed
-                    remaining_tricks_needed = claim - tricks_already_won
-                    
-                    if verbose:
-                        # Calculate individual claimer tricks for comparison
-                        individual_claimer_tricks = sum(1 for winner in trick_won_by if winner == claimer_position_i)
-                        
-                        print(f"CLAIM DEBUG: Contract: {contract}, declarer position: {decl_i} (NESW)")
-                        print(f"CLAIM DEBUG: Opening leader: {'NESW'[opening_leader_nesw]} (NESW pos {opening_leader_nesw})")
-                        print(f"CLAIM DEBUG: Position mapping - NESW->PlayOrder: {nesw_to_play_order}")
-                        print(f"CLAIM DEBUG: Declaring positions (play order): {declaring_side_positions}, Defending positions: {defending_side_positions}")
-                        print(f"CLAIM DEBUG: Claimer actual position: {actual_claimer_i}, board position: {claimer_position_i}")
-                        print(f"CLAIM DEBUG: Claimer is {'declaring' if claimer_is_declaring else 'defending'} side")
-                        print(f"CLAIM DEBUG: Tricks won by: {trick_won_by}")
-                        print(f"CLAIM DEBUG: Individual claimer tricks: {individual_claimer_tricks}, Partnership tricks: {tricks_already_won}")
-                        print(f"CLAIM DEBUG: Total claim: {claim}, Remaining needed: {remaining_tricks_needed}")
-                    
-                    canclaim, samples_used = claimer.claimapi(
+                    canclaim = claimer.claimapi(
                         strain_i=strain_i,
-                        player_i=actual_claimer_i,
+                        player_i=player_i,
                         hands52=[card_player.hand52 for card_player in card_players],
-                        n_samples=configuration.getint('cardplay', 'claim_samples', fallback=1),
-                        hidden_cards=hidden_cards,
-                        current_trick=current_trick52,
-                        claimer_board_pos=claimer_position_i,
-                        decl_board_pos=decl_i,
-                        tricks_already_won=tricks_already_won
+                        n_samples=1,
+                        hidden_cards=deck,
+                        current_trick=current_trick52
                     )
-                    # claimer position is relative to declarer - define this outside the if/else scope
-                    claimedbydeclarer = (actual_claimer_i == 3) or (actual_claimer_i == 1)
                     if (claim <= canclaim):
-                        accepted = True
+                        # player_i is relative to declarer
+                        claimedbydeclarer = (player_i == 3) or (player_i == 1)
                         if claimedbydeclarer:
                             msg = f"Contract: {contract} Accepted declarers claim of {claim} tricks"
                         else:
                             msg = f"Contract: {contract} Accepted opponents claim of {claim} tricks"
                     else:
-                        accepted = False
                         if claimedbydeclarer:
-                            msg = f"Contract: {contract} Rejected declarers claim of {claim} tricks"
+                            msg = f"Declarer claimed {claim} tricks - rejected {canclaim}"
                         else:
-                            msg = f"Contract: {contract} Rejected opponents claim of {claim} tricks"
-                    return None, player_i, msg + f"|ACCEPTED:{accepted}|TRICKS_CLAIMABLE:{canclaim}"
+                            msg = f"Opponents claimed {claim} tricks - rejected {canclaim}"
+                    return None, player_i, msg
 
                 assert (player_i == cardplayer_i or (player_i == 1 and cardplayer_i == 3)), f"Cardplay order is not correct {play} {player_i} {cardplayer_i} (or another player to play a card)"
                 play_status = get_play_status(card_players[player_i].hand52,current_trick52, strain_i)
@@ -523,35 +406,17 @@ board_no.append(0)
 config_path = get_execution_path()
     
 parser = argparse.ArgumentParser(description="Game API")
-parser.add_argument("--host", default="0.0.0.0", help="Hostname for appserver")
-# Previous default was: default_api.conf
-#parser.add_argument("--config", default=f"{config_path}/config/production_api.conf", help="Filename for configuration")
-parser.add_argument("--config", default=f"{config_path}/config/minimal_search_api.conf", help="Filename for configuration")
+parser.add_argument("--host", default="localhost", help="Hostname for appserver")
+parser.add_argument("--config", default=f"{config_path}/config/default_api.conf", help="Filename for configuration")
 parser.add_argument("--opponent", default="", help="Filename for configuration pf opponents")
 parser.add_argument("--verbose", type=str_to_bool, default=False, help="Output samples and other information during play")
 parser.add_argument("--port", type=int, default=8085, help="Port for appserver")
 parser.add_argument("--record", type=str_to_bool, default=True, help="Recording of responses")
-parser.add_argument("--seed", type=int, default=442, help="Seed for random")
+parser.add_argument("--seed", type=int, default=42, help="Seed for random")
 parser.add_argument("--matchpoint", type=str_to_bool, default=None, help="Playing match point")
 parser.add_argument("--nolimit", type=str_to_bool, default=False, help="Removed limit on number of requests to the API")
 
-# Parse args only when running directly, not when imported by gunicorn
-if __name__ == "__main__":
-    args = parser.parse_args()
-else:
-    # Default values when imported as a module (e.g., by gunicorn)
-    class Args:
-        host = "0.0.0.0"
-#        config = f"{config_path}/config/production_api.conf"
-        config = f"{config_path}/config/minimal_search_api.conf"
-        opponent = ""
-        verbose = False
-        port = 8085
-        record = True
-        matchpoint = None
-        seed = 442
-        nolimit = False
-    args = Args()
+args = parser.parse_args()
 
 configfile = args.config
 opponentfile = args.opponent
@@ -1390,8 +1255,6 @@ def claim():
     try:
         t_start = time.time()
         claim = request.args.get("tricks")
-        if claim:
-            claim = int(claim)  # Convert to integer for comparison
         # First we extract the hands and seat
         hand_str = request.args.get("hand").replace('_','.')
         dummy_str = request.args.get("dummy").replace('_','.')
@@ -1473,16 +1336,8 @@ def claim():
         aceking = {}
 
         with model_lock_play:
-            card_resp, player_i, msg =  play_api(dealer_i, vuln[0], vuln[1], hands, models, sampler, contract, strain_i, decl_i, auction, cards, cardplayer, claim, aceking, verbose, claimer_position_i=position_i)
-        
-        # Parse the enhanced message format
-        if "|ACCEPTED:" in msg:
-            parts = msg.split("|")
-            result["result"] = parts[0]
-            result["accepted"] = parts[1].split(":")[1] == "True"
-            result["tricks_claimable"] = int(parts[2].split(":")[1])
-        else:
-            result["result"] = msg
+            card_resp, player_i, msg =  play_api(dealer_i, vuln[0], vuln[1], hands, models, sampler, contract, strain_i, decl_i, auction, cards, cardplayer, claim, aceking, verbose)
+        result["result"] = msg
         if record: 
             calculations = {"hand":hand_str, "dummy":dummy_str, "vuln":vuln, "dealer":dealer, "seat":seat, "auction":auction, "play":result, "claim":claim}
             logger.info(f"Calculations play: {json.dumps(calculations)}")
@@ -1546,10 +1401,10 @@ def robots_txt():
 if __name__ == "__main__":
     print(Back.BLACK)
     try:
-        # Run Flask development server (single-threaded)
-        # For production, use: gunicorn -w 4 --timeout 120 --bind 0.0.0.0:8085 gameapi:app
-        print(f"Starting Flask development server on {host}:{port}")
-        print("Note: This is single-threaded. For production with concurrency, use gunicorn.")
-        app.run(host=host, port=port, debug=False, threaded=False)
+        # Run the Flask app with gevent server
+        http_server = WSGIServer((host, port), app)
+        http_server.spawn = 4 #Create 4 Workers
+        http_server.connection_timeout = 120  # Set timeout to 120 seconds
+        http_server.serve_forever()
     finally:
         print(Style.RESET_ALL)        

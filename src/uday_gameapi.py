@@ -191,36 +191,16 @@ def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strai
             if card_i >= len(play):
                 if claim:
                     claimer = Claimer(verbose, dds)
-                    # For partial hands, we need a different approach to find hidden cards
-                    # Start with a full deck
-                    full_deck = np.ones(52)
+                    # Fix: Use the deck variable which already tracks played cards correctly
+                    # deck starts as all 1s and gets decremented as cards are played
+                    # Hidden cards are those not in any player's hand and not in current trick
+                    hidden_cards = deck.copy()
                     
-                    # Remove cards from the original partial hands (before play)
-                    # Parse the original hand strings to get initial cards
-                    import binary
-                    parse_hand = binary.parse_hand_f(52)
-                    original_hands = [
-                        parse_hand(lefty_hand_str).reshape(52) if lefty_hand_str != '...' else np.zeros(52),
-                        parse_hand(dummy_hand_str).reshape(52) if dummy_hand_str != '...' else np.zeros(52),
-                        parse_hand(righty_hand_str).reshape(52) if righty_hand_str != '...' else np.zeros(52),
-                        parse_hand(decl_hand_str).reshape(52) if decl_hand_str != '...' else np.zeros(52)
-                    ]
-                    
-                    # Remove original hand cards from full deck
-                    for hand in original_hands:
-                        full_deck -= hand
-                    
-                    # Remove all played cards from the deck
-                    for trick in tricks52:
-                        for card in trick:
-                            full_deck[card] = 0
-                    
-                    # Remove current trick cards
-                    for card in current_trick52:
-                        full_deck[card] = 0
-                    
-                    # What remains is the hidden cards
-                    hidden_cards = full_deck
+                    # Remove cards that are currently in player hands
+                    for j in range(4):
+                        for i in range(52):
+                            if card_players[j].hand52[i] != 0:
+                                hidden_cards[i] = 0
                     
                     # Note: current_trick cards are already handled by deck tracking
                     
@@ -253,65 +233,15 @@ def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strai
                             actual_claimer_i = 2  # righty
                     else:
                         actual_claimer_i = player_i
-                    
-                    # Count tricks already won by the claiming side
-                    # trick_won_by contains play order positions where opening leader is position 0
-                    # We need to identify which play order positions belong to declaring side
-                    # Opening leader is at NESW position (decl_i + 1) % 4
-                    opening_leader_nesw = (decl_i + 1) % 4
-                    
-                    # Create dynamic mapping from NESW to play order based on actual opening leader
-                    # Play order: 0=opening_leader, 1=next, 2=next, 3=next
-                    nesw_to_play_order = {}
-                    for i in range(4):
-                        nesw_pos = (opening_leader_nesw + i) % 4
-                        nesw_to_play_order[nesw_pos] = i
-                    
-                    declarer_play_pos = nesw_to_play_order[decl_i]
-                    dummy_play_pos = nesw_to_play_order[(decl_i + 2) % 4]
-                    
-                    declaring_side_positions = [declarer_play_pos, dummy_play_pos]  # declarer and dummy in play order
-                    defending_side_positions = [pos for pos in range(4) if pos not in declaring_side_positions]  # defenders
-                    
-                    tricks_won_by_declarer_side = sum(1 for winner in trick_won_by if winner in declaring_side_positions)
-                    tricks_won_by_defender_side = sum(1 for winner in trick_won_by if winner in defending_side_positions)
-                    
-                    # Determine if claimer is on declaring side
-                    claimer_is_declaring = (actual_claimer_i == 3) or (actual_claimer_i == 1)
-                    
-                    # Calculate tricks already won by claiming side
-                    if claimer_is_declaring:
-                        tricks_already_won = tricks_won_by_declarer_side
-                    else:
-                        tricks_already_won = tricks_won_by_defender_side
-                    
-                    # The claim is for total tricks, but we need to check remaining tricks needed
-                    remaining_tricks_needed = claim - tricks_already_won
-                    
-                    if verbose:
-                        # Calculate individual claimer tricks for comparison
-                        individual_claimer_tricks = sum(1 for winner in trick_won_by if winner == claimer_position_i)
-                        
-                        print(f"CLAIM DEBUG: Contract: {contract}, declarer position: {decl_i} (NESW)")
-                        print(f"CLAIM DEBUG: Opening leader: {'NESW'[opening_leader_nesw]} (NESW pos {opening_leader_nesw})")
-                        print(f"CLAIM DEBUG: Position mapping - NESW->PlayOrder: {nesw_to_play_order}")
-                        print(f"CLAIM DEBUG: Declaring positions (play order): {declaring_side_positions}, Defending positions: {defending_side_positions}")
-                        print(f"CLAIM DEBUG: Claimer actual position: {actual_claimer_i}, board position: {claimer_position_i}")
-                        print(f"CLAIM DEBUG: Claimer is {'declaring' if claimer_is_declaring else 'defending'} side")
-                        print(f"CLAIM DEBUG: Tricks won by: {trick_won_by}")
-                        print(f"CLAIM DEBUG: Individual claimer tricks: {individual_claimer_tricks}, Partnership tricks: {tricks_already_won}")
-                        print(f"CLAIM DEBUG: Total claim: {claim}, Remaining needed: {remaining_tricks_needed}")
-                    
                     canclaim, samples_used = claimer.claimapi(
                         strain_i=strain_i,
                         player_i=actual_claimer_i,
                         hands52=[card_player.hand52 for card_player in card_players],
-                        n_samples=configuration.getint('cardplay', 'claim_samples', fallback=1),
+                        n_samples=getattr(models, 'claim_samples', 1),
                         hidden_cards=hidden_cards,
                         current_trick=current_trick52,
                         claimer_board_pos=claimer_position_i,
-                        decl_board_pos=decl_i,
-                        tricks_already_won=tricks_already_won
+                        decl_board_pos=decl_i
                     )
                     # claimer position is relative to declarer - define this outside the if/else scope
                     claimedbydeclarer = (actual_claimer_i == 3) or (actual_claimer_i == 1)
@@ -327,7 +257,7 @@ def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strai
                             msg = f"Contract: {contract} Rejected declarers claim of {claim} tricks"
                         else:
                             msg = f"Contract: {contract} Rejected opponents claim of {claim} tricks"
-                    return None, player_i, msg + f"|ACCEPTED:{accepted}|TRICKS_CLAIMABLE:{canclaim}"
+                    return None, player_i, msg + f"|ACCEPTED:{accepted}|TRICKS_CLAIMABLE:{canclaim}|SAMPLES:{samples_used}"
 
                 assert (player_i == cardplayer_i or (player_i == 1 and cardplayer_i == 3)), f"Cardplay order is not correct {play} {player_i} {cardplayer_i} (or another player to play a card)"
                 play_status = get_play_status(card_players[player_i].hand52,current_trick52, strain_i)
@@ -680,7 +610,7 @@ CORS(app)
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,  # Limits based on the remote IP address
-    default_limits=["20000 per day", "5000 per hour", "100 per minute"]
+    default_limits=["2000000 per day", "5000000 per hour", "100000 per minute"]
     # storage_uri="memory://" # Default, suitable for single-process test server.
                                # For production with multiple workers, use Redis or Memcached:
                                # "redis://localhost:6379"
@@ -1481,6 +1411,7 @@ def claim():
             result["result"] = parts[0]
             result["accepted"] = parts[1].split(":")[1] == "True"
             result["tricks_claimable"] = int(parts[2].split(":")[1])
+            result["samples_used"] = int(parts[3].split(":")[1])
         else:
             result["result"] = msg
         if record: 

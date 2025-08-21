@@ -124,3 +124,8 @@ Practice
 .venv
 uv.lock
 .python-version
+
+# ClaudePoint checkpoint system
+.claudepoint/
+.claude/
+backup/
