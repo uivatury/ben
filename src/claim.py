@@ -418,14 +418,27 @@ class Claimer:
                         suit_parts = hand_str.split('.')
                         print(f"  {positions[pos_i]}: {' '.join(f'{suits[i]}{cards}' for i, cards in enumerate(suit_parts))}")
             
-            # Show what DDS trump conversion will be
-            dds_trump = (strain_i - 1) % 5
-            trump_names = ['Spades', 'Hearts', 'Diamonds', 'Clubs', 'NoTrump']
-            print(f"CLAIM DEBUG: DDS trump conversion: strain_i={strain_i} -> DDS trump={dds_trump} ({trump_names[dds_trump]})")
+            # BEN's strain_i already matches DDS format: 0=NT, 1=S, 2=H, 3=D, 4=C
+            trump_names = ['NoTrump', 'Spades', 'Hearts', 'Diamonds', 'Clubs']
+            print(f"CLAIM DEBUG: DDS trump format: strain_i={strain_i} ({trump_names[strain_i]})")
             
-        # Convert strain_i to DDS trump format: strain_i 1-5 -> DDS 0-4
-        dds_trump = (strain_i - 1) % 5
-        dd_solved = self.dd.solve(dds_trump, leader_i, current_trick, hands_pbn, 1)
+        # BEN's strain_i already matches DDS format: 0=NT, 1=S, 2=H, 3=D, 4=C
+        # No conversion needed
+        
+        if self.verbose:
+            print(f"CLAIM DEBUG: About to call DDS with:")
+            print(f"  strain_i: {strain_i}")
+            print(f"  leader_i: {leader_i}")
+            print(f"  current_trick: {current_trick}")
+            print(f"  hands_pbn: {hands_pbn}")
+            print(f"  solutions: 1")
+            print(f"  DDS solver config: dds_mode={getattr(self.dd, 'dds_mode', 'unknown')}, verbose={getattr(self.dd, 'verbose', 'unknown')}")
+            
+        dd_solved = self.dd.solve(strain_i, leader_i, current_trick, hands_pbn, 1)
+        
+        if self.verbose:
+            print(f"CLAIM DEBUG: Raw DDS solve returned: {dd_solved}")
+            print(f"CLAIM DEBUG: Type of result: {type(dd_solved)}")
         
         # Critical fix: Check if DDS solver returned None (failed)
         if dd_solved is None:
