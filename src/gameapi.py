@@ -836,6 +836,7 @@ def bid():
             mp = request.args.get("tournament").lower() == "mp"
             models.matchpoint = mp
         details = request.args.get("details")
+        userdata = request.args.get("userdata")  # Extract userdata parameter
         # First we extract our hand
         hand = request.args.get("hand").replace('_','.').upper()
         if 'X' in hand:
@@ -889,6 +890,10 @@ def bid():
         else:
             result["explanations"] = explanations
 
+        # Add userdata to response if provided
+        if userdata is not None:
+            result["userdata"] = userdata
+
         if record: 
             calculations = {"hand":hand, "vuln":vuln, "dealer":dealer, "seat":seat, "auction":auction, "bid":bid.to_dict()}
             logger.info(f"Calculations bid: {json.dumps(calculations)}")
@@ -915,6 +920,7 @@ def lead():
         # First we extract our hand and seat
         hand = request.args.get("hand").replace('_','.').upper()
         details = request.args.get("details")
+        userdata = request.args.get("userdata")  # Extract userdata parameter
         if 'X' in hand:
             if '8' in hand or '9' in hand:
                 hand = replace_x(hand,get_random_generator(hand), "...", [], models.n_cards_play)
@@ -965,6 +971,8 @@ def lead():
         if record: 
             calculations = {"hand":hand, "vuln":vuln, "dealer":dealer, "seat":seat, "auction":auction,  "lead":result}
             logger.info(f"Calculations lead: {json.dumps(calculations)}")
+        if userdata is not None:
+            result["userdata"] = userdata
         print(f'Request took {(time.time() - t_start):0.2f} seconds')       
         return json.dumps(result)
     except Exception as e:
@@ -978,6 +986,7 @@ def lead():
 def play():
     try:
         t_start = time.time()
+        userdata = request.args.get("userdata")
         if request.args.get("dealno"):
             dealno = request.args.get("dealno")
             dealno = "{}-{}".format(dealno, datetime.datetime.now().strftime("%Y-%m-%d"))    
@@ -1109,6 +1118,8 @@ def play():
         if record: 
             calculations = {"hand":hand_str, "dummy":dummy_str, "vuln":vuln, "dealer":dealer, "seat":seat, "auction":auction, "play":result}
             logger.info(f"Calculations play: {json.dumps(calculations)}")
+        if userdata is not None:
+            result["userdata"] = userdata
         print(f'Request took {(time.time() - t_start):0.2f} seconds')       
         return json.dumps(result)
     except Exception as e:
@@ -1162,6 +1173,7 @@ def cuebidscores():
 @app.route('/cuebid', methods=['POST'])
 def cuebid():
     t_start = time.time()
+    userdata = request.args.get("userdata")
     # Override defaults as cuebids must finish 8 boards within 9 mins
     sampler.no_samples_when_no_search = True
     sampler.sample_boards_for_auction = 5000
@@ -1210,13 +1222,15 @@ def cuebid():
     if record: 
         calculations = {"hand":hand, "vuln":vuln, "dealer":dealer, "turn":turn, "auction":auction, "bid":bid.to_dict()}
         logger.info(f"Calculations cuebid: {json.dumps(calculations)}")
-
+    if userdata is not None:
+        result["userdata"] = userdata
     print(f'Request took {(time.time() - t_start):0.2f} seconds')       
     return json.dumps(result),200
 
 @app.route('/explain')
 def explain():
     t_start = time.time()
+    userdata = request.args.get("userdata")
     from bba.BBA import BBABotBid
     # First we extract the hands and seat
     seat = request.args.get("seat")
@@ -1245,12 +1259,15 @@ def explain():
     explanation, alert = bot.explain_last_bid(auction)
     
     result = {"explanation": explanation, "Alert": alert} # explaination
+    if userdata is not None:
+        result["userdata"] = userdata
     print(f'Request took {(time.time() - t_start):0.2f} seconds')       
 
     return json.dumps(result)
 @app.route('/explain_auction')
 def explain_auction():
     t_start = time.time()
+    userdata = request.args.get("userdata")
     from bba.BBA import BBABotBid
     # First we extract the hands and seat
     seat = request.args.get("seat")
@@ -1287,6 +1304,8 @@ def explain_auction():
 
 
     result = {"explanation": html_list, "bba_controlled": bba_controlled} # explaination
+    if userdata is not None:
+        result["userdata"] = userdata
     print(f'Request took {(time.time() - t_start):0.2f} seconds')       
 
     return json.dumps(result)
@@ -1294,6 +1313,7 @@ def explain_auction():
 @limiter.limit("1000/hour;100/minute")
 def bids():
     t_start = time.time()
+    userdata = request.args.get("userdata")
     base_path = os.getenv('BEN_HOME') or '..'
     file_us = request.args.get("file_us")
     file_them = request.args.get("file_them")
@@ -1323,6 +1343,8 @@ def bids():
 
     result = bot.list_bids(auction)
     
+    if userdata is not None:
+        result["userdata"] = userdata
     print(f'Request took {(time.time() - t_start):0.2f} seconds')       
 
     return json.dumps(result)
@@ -1331,6 +1353,7 @@ def bids():
 def contract():
     try:
         t_start = time.time()
+        userdata = request.args.get("userdata")
         # First we extract the hands and seat
         hand_str = request.args.get("hand").replace('_','.')
         dummy_str = request.args.get("dummy").replace('_','.')
@@ -1377,6 +1400,8 @@ def contract():
                                     "Percentage": [round(float(tricks[0][j]), 2)]
                                 }                    
 
+            if userdata is not None:
+                result["userdata"] = userdata
             print(f'Request took {(time.time() - t_start):0.2f} seconds')       
         return json.dumps(result)    
     except Exception as e:
@@ -1389,6 +1414,7 @@ def contract():
 def claim():
     try:
         t_start = time.time()
+        userdata = request.args.get("userdata")
         claim = request.args.get("tricks")
         if claim:
             claim = int(claim)  # Convert to integer for comparison
@@ -1486,6 +1512,8 @@ def claim():
         if record: 
             calculations = {"hand":hand_str, "dummy":dummy_str, "vuln":vuln, "dealer":dealer, "seat":seat, "auction":auction, "play":result, "claim":claim}
             logger.info(f"Calculations play: {json.dumps(calculations)}")
+        if userdata is not None:
+            result["userdata"] = userdata
         print(f'Request took {(time.time() - t_start):0.2f} seconds')       
         return json.dumps(result)
     except Exception as e:
