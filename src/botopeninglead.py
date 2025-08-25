@@ -146,7 +146,8 @@ class BotLead:
                 ))
 
         else:
-            # We do not have any samples, so we will just use the neural network        
+            # We do not have any samples, so we will just use the neural network
+            print("DEBUG: NO SAMPLES FOUND - Falling back to neural network only")
             for i, card_i in enumerate(lead_card_indexes):
                 candidate_cards.append(CandidateCard(
                     card=Card.from_code(int(card_i), xcards=True),
@@ -191,20 +192,22 @@ class BotLead:
                             candidate_cards = sorted(candidate_cards, key=lambda c: (-round(c.expected_tricks_dd, 1) if c.expected_tricks_dd is not None else 0, round(c.insta_score, 2)), reverse=True)
                             who = "Simulation (Tricks DD)"
                         else:
-                            candidate_cards = sorted(candidate_cards, key=lambda c: (round(5*c.p_make_contract, 1) if c.p_make_contract is not None else 0, -round(c.expected_tricks_dd, 1) if c.expected_tricks_dd is not None else 0, round(c.insta_score, 2)), reverse=True)
+                            candidate_cards = sorted(candidate_cards, key=lambda c: (-round(5*c.p_make_contract, 1) if c.p_make_contract is not None else 0, -round(c.expected_tricks_dd, 1) if c.expected_tricks_dd is not None else 0, round(c.insta_score, 2)), reverse=True)
                             who = "Simulation (make/set DD)"
                     else:
                         if self.models.matchpoint:
-                            candidate_cards = sorted(candidate_cards, key=lambda c: (-round(c.expected_tricks_sd, 1) if c.expected_tricks_sd is not None else 0, round(c.insta_score, 2)), reverse=True)
+                            candidate_cards = sorted(candidate_cards, key=lambda c: (c.expected_tricks_sd if c.expected_tricks_sd is not None else 0, c.insta_score), reverse=True)
                             who = "Simulation (Tricks SD)"
                         else:
-                            candidate_cards = sorted(candidate_cards, key=lambda c: (round(5*c.p_make_contract, 1) if c.p_make_contract is not None else 0, -round(c.expected_tricks_sd, 1) if c.expected_tricks_sd is not None else 0, round(c.insta_score, 2)), reverse=True)
+                            candidate_cards = sorted(candidate_cards, key=lambda c: (-round(5*c.p_make_contract, 1) if c.p_make_contract is not None else 0, -round(c.expected_tricks_sd, 1) if c.expected_tricks_sd is not None else 0, round(c.insta_score, 2)), reverse=True)
                             who = "Simulation (make/set SD)"
                 opening_lead = candidate_cards[0].card.code()
 
         if self.verbose:
+            print(f"DEBUG: VERBOSE MODE ENABLED")
             print(f"Samples quality: {quality:.3f}")
             for card in candidate_cards:
+                print(f"DEBUG UNROUNDED: {card.card.symbol()} - exp_tricks_sd={card.expected_tricks_sd:.6f}")
                 print(card)
         if opening_lead % 8 > 5:
             contract = bidding.get_contract(auction)
