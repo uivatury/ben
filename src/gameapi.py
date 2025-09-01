@@ -302,6 +302,21 @@ def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strai
                         print(f"CLAIM DEBUG: Individual claimer tricks: {individual_claimer_tricks}, Partnership tricks: {tricks_already_won}")
                         print(f"CLAIM DEBUG: Total claim: {claim}, Remaining needed: {remaining_tricks_needed}")
                     
+                    # Convert from CardPlayer position to Board position (NESW)
+                    # CardPlayer: 0=lefty, 1=dummy, 2=righty, 3=declarer
+                    # Board: 0=North, 1=East, 2=South, 3=West
+                    cardplayer_to_board = {}
+                    cardplayer_to_board[3] = decl_i  # declarer
+                    cardplayer_to_board[1] = (decl_i + 2) % 4  # dummy
+                    cardplayer_to_board[0] = (decl_i + 1) % 4  # lefty
+                    cardplayer_to_board[2] = (decl_i + 3) % 4  # righty
+                    
+                    next_to_play_board_pos = cardplayer_to_board[player_i]
+                    
+                    if verbose:
+                        print(f"COORDINATE CONVERSION: player_i={player_i} (CardPlayer) -> next_to_play_board_pos={next_to_play_board_pos} (Board)")
+                        print(f"  decl_i={decl_i}, CardPlayer->Board mapping: {cardplayer_to_board}")
+                    
                     canclaim, samples_used = claimer.claimapi(
                         strain_i=strain_i,
                         player_i=actual_claimer_i,
@@ -311,7 +326,8 @@ def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strai
                         current_trick=current_trick52,
                         claimer_board_pos=claimer_position_i,
                         decl_board_pos=decl_i,
-                        tricks_already_won=tricks_already_won
+                        tricks_already_won=tricks_already_won,
+                        next_to_play_board_pos=next_to_play_board_pos
                     )
                     # claimer position is relative to declarer - define this outside the if/else scope
                     claimedbydeclarer = (actual_claimer_i == 3) or (actual_claimer_i == 1)

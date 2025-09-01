@@ -167,7 +167,7 @@ class Claimer:
             print(f"Play without sure claim: {bad_plays}")
         return bad_plays
 
-    def claimapi(self, strain_i, player_i, hands52, n_samples, hidden_cards, current_trick, claimer_board_pos=None, decl_board_pos=None, tricks_already_won=0):
+    def claimapi(self, strain_i, player_i, hands52, n_samples, hidden_cards, current_trick, claimer_board_pos=None, decl_board_pos=None, tricks_already_won=0, next_to_play_board_pos=None):
         t_start = time.time()
 
         # Enhanced debugging: Log input parameters
@@ -176,6 +176,7 @@ class Claimer:
             hidden_card_count = np.sum(hidden_cards)
             current_trick_count = len(current_trick)
             print(f"CLAIM DEBUG: strain_i={strain_i}, player_i={player_i}, n_samples={n_samples}")
+            print(f"CLAIM DEBUG: next_to_play_board_pos={next_to_play_board_pos}, claimer_board_pos={claimer_board_pos}, decl_board_pos={decl_board_pos}")
             print(f"CLAIM DEBUG: total_cards_in_hands={total_cards_in_hands}, hidden_cards={hidden_card_count}, current_trick_cards={current_trick_count}")
             print(f"CLAIM DEBUG: expected total = {total_cards_in_hands + hidden_card_count + current_trick_count} (should be 52)")
             # Debug the actual hands52 content
@@ -296,8 +297,57 @@ class Claimer:
                 print(f"CLAIM DEBUG: hands52[{cp_idx_0}] = {np.sum(hands52[cp_idx_0])} cards, hands52[{cp_idx_1}] = {np.sum(hands52[cp_idx_1])} cards")
                 print(f"CLAIM DEBUG: clean_hand_0 = {np.sum(clean_hand_0)} cards, clean_hand_1 = {np.sum(clean_hand_1)} cards")
             
-            # Note: We no longer add current trick cards back to hands
-            # DDS handles partial tricks natively via currentTrickSuit/Rank fields
+            # Helper function to assign current trick cards back to hands
+            def assign_current_trick_cards(hands_dict, label="", first_sample_only=False, sample_i=0):
+                """
+                Assign current trick cards back to the appropriate hands.
+                
+                Args:
+                    hands_dict: Dict mapping board positions to hand arrays to update
+                    label: Label for debug output (e.g., "seen" or "hidden")
+                    first_sample_only: Only show debug for first sample (for hidden hands)
+                    sample_i: Current sample index (for hidden hands)
+                """
+                if not current_trick:
+                    return
+                    
+                trick_leader = (next_to_play_board_pos - len(current_trick)) % 4
+                
+                # Print header only once for seen hands
+                if self.verbose and label == "seen":
+                    print(f"CLAIM DEBUG: Current trick assignment:")
+                    print(f"  next_to_play_board_pos={next_to_play_board_pos}, len(current_trick)={len(current_trick)}")
+                    print(f"  trick_leader = ({next_to_play_board_pos} - {len(current_trick)}) % 4 = {trick_leader}")
+                
+                for i, card52 in enumerate(current_trick):
+                    player_pos = (trick_leader + i) % 4
+                    
+                    if self.verbose and label == "seen":
+                        card_name = deck52.decode_card(card52)
+                        board_positions = ['North', 'East', 'South', 'West']
+                        print(f"  Card {i}: {card_name} -> {board_positions[player_pos]} (board pos {player_pos})")
+                    
+                    if player_pos in hands_dict:
+                        hands_dict[player_pos][card52] = 1
+                        if self.verbose:
+                            if label == "seen":
+                                print(f"    Added to {label} hand (pos {player_pos})")
+                            elif label == "hidden" and (not first_sample_only or sample_i == 0):
+                                card_name = deck52.decode_card(card52)
+                                print(f"    Hidden: {card_name} added to hidden hand (pos {player_pos})")
+                    elif self.verbose and label == "seen":
+                        print(f"    Will be added to hidden hand {player_pos}")
+            
+            # CRITICAL FIX: Add current trick cards back to hands for DDS
+            # DDS requires all cards to be accounted for in the hands
+            # The current_trick parameter tells DDS which cards are already played this trick
+            
+            # Add current_trick cards back to seen hands
+            seen_hands_dict = {
+                seen_hand_indexes[0]: clean_hand_0,
+                seen_hand_indexes[1]: clean_hand_1
+            }
+            assign_current_trick_cards(seen_hands_dict, label="seen")
             
             hands[seen_hand_indexes[0]] = deck52.deal_to_str(clean_hand_0)
             hands[seen_hand_indexes[1]] = deck52.deal_to_str(clean_hand_1)
@@ -311,8 +361,12 @@ class Claimer:
                 hidden_hand_0 = _hand_from_cards(52, hidden_cards[:n_cards])
                 hidden_hand_1 = _hand_from_cards(52, hidden_cards[n_cards:])
                 
-                # Note: We no longer add current trick cards to hidden hands
-                # DDS handles partial tricks natively via currentTrickSuit/Rank fields
+                # Add current_trick cards to hidden hands too
+                hidden_hands_dict = {
+                    hidden_hand_indexes[0]: hidden_hand_0,
+                    hidden_hand_indexes[1]: hidden_hand_1
+                }
+                assign_current_trick_cards(hidden_hands_dict, label="hidden", first_sample_only=True, sample_i=i)
                 
                 # ONLY assign to hidden positions, keep known hands unchanged
                 hands[hidden_hand_indexes[0]] = deck52.deal_to_str(hidden_hand_0)
@@ -337,12 +391,17 @@ class Claimer:
                     print(f"Sample hand generated: {sample_hand}")
 
         try:
-            # Use board position for DDS call, not CardPlayer position
-            dds_player_i = claimer_board_pos if claimer_board_pos is not None else player_i
-            if self.verbose:
-                print(f"CLAIM DEBUG: Using DDS player position: {dds_player_i} (board pos) instead of {player_i} (CardPlayer pos)")
-            
-            max_min_tricks = self._get_max_min_tricks(strain_i, dds_player_i, sampled_hands_pbn, current_trick)
+            # Use the correct next player board position
+            if next_to_play_board_pos is not None:
+                if self.verbose:
+                    print(f"CLAIM DEBUG: Using next_to_play_board_pos: {next_to_play_board_pos}")
+                max_min_tricks = self._get_max_min_tricks(strain_i, next_to_play_board_pos, sampled_hands_pbn, current_trick)
+            else:
+                # Fallback for backward compatibility (should not happen with new gameapi)
+                dds_player_i = claimer_board_pos if claimer_board_pos is not None else player_i
+                if self.verbose:
+                    print(f"CLAIM DEBUG: Fallback - using claimer position: {dds_player_i}")
+                max_min_tricks = self._get_max_min_tricks(strain_i, dds_player_i, sampled_hands_pbn, current_trick)
             if self.verbose:
                 print(f"CLAIM DEBUG: DDS returned max_min_tricks = {max_min_tricks}")
         except Exception as e:
@@ -400,10 +459,11 @@ class Claimer:
 
         return max_min_tricks
 
-    def _get_max_min_tricks(self, strain_i, player_i, hands_pbn, current_trick):
-        leader_i = (player_i-len(current_trick)) % 4
+    def _get_max_min_tricks(self, strain_i, next_to_play_board_pos, hands_pbn, current_trick):
+        # Simple and correct: use the board position of who plays next
+        leader_i = next_to_play_board_pos
         if self.verbose:
-            print(f"CLAIM DEBUG: Calling DDS with strain={strain_i}, player={player_i}, leader={leader_i}")
+            print(f"CLAIM DEBUG: Calling DDS with strain={strain_i}, leader={leader_i}")
             print(f"CLAIM DEBUG: First sample hand: {hands_pbn[0] if hands_pbn else 'None'}")
             print(f"CLAIM DEBUG: Current trick: {current_trick}")
             
@@ -426,13 +486,20 @@ class Claimer:
         # No conversion needed
         
         if self.verbose:
+            # Human-readable names for better debugging
+            strain_names = ['NT', 'Spades', 'Hearts', 'Diamonds', 'Clubs']
+            position_names = ['North', 'East', 'South', 'West']
+            current_trick_cards = [deck52.decode_card(card) for card in current_trick] if current_trick else []
+            
             print(f"CLAIM DEBUG: About to call DDS with:")
-            print(f"  strain_i: {strain_i}")
-            print(f"  leader_i: {leader_i}")
-            print(f"  current_trick: {current_trick}")
+            print(f"  strain_i: {strain_i} ({strain_names[strain_i]})")
+            print(f"  leader_i: {leader_i} ({position_names[leader_i]})")
+            print(f"  current_trick: {current_trick} -> {current_trick_cards}")
             print(f"  hands_pbn: {hands_pbn}")
             print(f"  solutions: 1")
-            print(f"  DDS solver config: dds_mode={getattr(self.dd, 'dds_mode', 'unknown')}, verbose={getattr(self.dd, 'verbose', 'unknown')}")
+            dds_mode = getattr(self.dd, 'dds_mode', 'unknown')
+            mode_desc = "(always find score, reuse transport tables)" if dds_mode == 1 else f"(mode {dds_mode})"
+            print(f"  DDS solver config: dds_mode={dds_mode} {mode_desc}, verbose={getattr(self.dd, 'verbose', 'unknown')}")
             
         dd_solved = self.dd.solve(strain_i, leader_i, current_trick, hands_pbn, 1)
         
@@ -443,7 +510,7 @@ class Claimer:
         # Critical fix: Check if DDS solver returned None (failed)
         if dd_solved is None:
             if self.verbose:
-                print(f"DDS solver failed for strain={strain_i}, player={player_i}, hands={hands_pbn}, current_trick={current_trick}")
+                print(f"DDS solver failed for strain={strain_i}, leader={leader_i}, hands={hands_pbn}, current_trick={current_trick}")
             return 0  # Conservative: assume no tricks can be claimed if solver fails
         
         if self.verbose:
