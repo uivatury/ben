@@ -82,62 +82,85 @@ def calculate_steps(auction):
         return 1
     return 1 + bids // 4
 
-def get_auction_binary(n_steps, auction, hand_ix, hand, vuln):
-    """Create binary representation of auction for model input"""
+def get_auction_binary(n_steps, auction, hand_ix, hand, vuln, ns_system=1, ew_system=1):
+    """Create binary representation matching BEN's get_auction_binary_sampling exactly"""
     n_samples = 1
     n_cards = 24
+    bids = 4  # Model version >= 2
     
-    # Feature dimensions: vuln(2) + systems(2) + hcp(1) + shape(4) + cards(24) + 4*bids(40)
-    # Total: 2 + 2 + 1 + 4 + 24 + 160 = 193
-    X = np.zeros((n_samples, n_steps, 193), dtype=np.float16)
+    # Feature dimensions: vuln(2) + hcp(1) + shape(4) + cards(24) + 4*bids(40) = 191
+    # Plus 2 for bidding systems = 193
+    X = np.zeros((n_samples, n_steps, 2 + 1 + 4 + n_cards + bids*40), dtype=np.float16)
     
     # Vulnerability encoding
     vuln_us_them = np.array([vuln[hand_ix % 2], vuln[(hand_ix + 1) % 2]], dtype=np.float16)
     
-    # Normalize HCP and shape
+    # Normalize HCP and shape (same as BEN)
     hcp = (get_hcp(hand) - 10) / 4
     shp = (get_shape(hand) - 3.25) / 1.75
     
-    # Pad auction
+    # Convert auction to ID format
     auction_padded = auction + ['PAD_END'] * (4 * n_steps)
-    auction_ids = np.array([BID2ID.get(bid, 1) for bid in auction_padded])
+    auction_ids = np.zeros((n_samples, len(auction_padded)), dtype=np.int32)
+    for i, bid in enumerate(auction_padded):
+        auction_ids[:, i] = BID2ID.get(bid, BID2ID['PAD_END'])
     
-    for step in range(n_steps):
-        # Vulnerability
-        X[:, step, 0:2] = vuln_us_them
-        
-        # Bidding systems (default to -1 meaning unknown)
-        X[:, step, 2:4] = -1
-        
-        # HCP and shape
-        X[:, step, 4] = hcp
-        X[:, step, 5:9] = shp
-        
-        # Hand cards
-        X[:, step, 9:33] = hand
-        
-        # Auction history (4 bids per step)
-        for bid_i in range(4):
-            if step == 0 and bid_i == 0:
-                continue  # Skip first position in first step
+    # Set constant features
+    X[:, :, :2] = vuln_us_them  # Vulnerability
+    X[:, :, 2:3] = hcp.reshape((n_samples, 1, 1))  # HCP
+    X[:, :, 3:7] = shp.reshape((n_samples, 1, 4))  # Shape
+    X[:, :, 7:7+n_cards] = hand.reshape((n_samples, 1, n_cards))  # Hand
+    
+    # Process auction history (matching BEN's logic exactly)
+    bid_i = hand_ix
+    # Skip PAD_START positions
+    while bid_i < len(auction_padded) and auction_padded[bid_i] == 'PAD_START':
+        bid_i += 4
+    
+    step_i = 0
+    s_all = np.arange(n_samples, dtype=np.int32)
+    
+    while step_i < n_steps:
+        # Get bids from 4 steps back (matching BEN's approach)
+        if bid_i - 4 >= 0:
+            my_bid = auction_ids[:, bid_i - 4][0]
+        else:
+            my_bid = BID2ID['PAD_START']
             
-            bid_idx = step * 4 + bid_i - 1
-            if bid_idx >= 0 and bid_idx < len(auction):
-                auction_offset = (hand_ix + bid_idx) % 4
-                if auction_offset == 0:  # My previous bid
-                    if auction_ids[bid_idx] < 40:
-                        X[:, step, 33 + auction_ids[bid_idx]] = 1
-                elif auction_offset == 1:  # LHO
-                    if auction_ids[bid_idx] < 40:
-                        X[:, step, 73 + auction_ids[bid_idx]] = 1
-                elif auction_offset == 2:  # Partner
-                    if auction_ids[bid_idx] < 40:
-                        X[:, step, 113 + auction_ids[bid_idx]] = 1
-                elif auction_offset == 3:  # RHO
-                    if auction_ids[bid_idx] < 40:
-                        X[:, step, 153 + auction_ids[bid_idx]] = 1
+        if bid_i - 3 >= 0:
+            lho_bid = auction_ids[:, bid_i - 3][0]
+        else:
+            lho_bid = BID2ID['PAD_START']
+            
+        if bid_i - 2 >= 0:
+            partner_bid = auction_ids[:, bid_i - 2][0]
+        else:
+            partner_bid = BID2ID['PAD_START']
+            
+        if bid_i - 1 >= 0:
+            rho_bid = auction_ids[:, bid_i - 1][0]
+        else:
+            rho_bid = BID2ID['PAD_START']
+        
+        # Set one-hot encodings for each bidder (4 bidders format)
+        X[s_all, step_i, 7+n_cards+my_bid] = 1
+        X[s_all, step_i, (7+n_cards+40)+lho_bid] = 1
+        X[s_all, step_i, (7+n_cards+2*40)+partner_bid] = 1
+        X[s_all, step_i, (7+n_cards+3*40)+rho_bid] = 1
+        
+        step_i += 1
+        bid_i += 4
     
-    return X
+    # Add bidding system information (matching BEN's padding logic)
+    padding_width = ((0, 0), (0, 0), (1, 0))
+    if (hand_ix % 2 == 0):  # NS partnership
+        X_padded = np.pad(X, padding_width, mode='constant', constant_values=ew_system)
+        X_padded = np.pad(X_padded, padding_width, mode='constant', constant_values=ns_system)
+    else:  # EW partnership
+        X_padded = np.pad(X, padding_width, mode='constant', constant_values=ns_system)
+        X_padded = np.pad(X_padded, padding_width, mode='constant', constant_values=ew_system)
+    
+    return X_padded
 
 # ========== MAIN FUNCTIONS ==========
 SEATS = {'N': 0, 'E': 1, 'S': 2, 'W': 3}
@@ -212,7 +235,7 @@ def infer_with_model(hand_str, auction, seat, vuln, model_path):
                  'EW': [False, True], 'Both': [True, True]}[vuln]
     
     n_steps = calculate_steps(auction)
-    X = get_auction_binary(n_steps, auction, seat_idx, hand, vuln_bool)
+    X = get_auction_binary(n_steps, auction, seat_idx, hand, vuln_bool, ns_system=1, ew_system=1)
     
     # Predict
     p_hcp, p_shp = model.predict(X)
@@ -229,9 +252,9 @@ def infer_with_model(hand_str, auction, seat, vuln, model_path):
     positions = get_relative_positions(seat)
     results = {}
     
-    # Model outputs might be in different order - need to map correctly
-    # Based on the issue described, let's try swapping LHO and RHO indices
-    pos_indices = {'LHO': 2, 'Partner': 1, 'RHO': 0}
+    # Model outputs predictions for 3 unknown hands in clockwise order from known hand:
+    # Index 0: LHO (next player clockwise), Index 1: Partner (opposite), Index 2: RHO (previous player clockwise)
+    pos_indices = {'LHO': 0, 'Partner': 1, 'RHO': 2}
     
     for pos, abs_seat in positions.items():
         i = pos_indices[pos]
