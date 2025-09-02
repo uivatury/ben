@@ -20,7 +20,8 @@ h5py==3.14.0
 idna==3.10
 itsdangerous==2.2.0
 Jinja2==3.1.6
-keras==3.11.1
+# keras==3.11.1  # Had to downgrade - opening lead models don't work with 3.11.1, need to be rebuilt
+keras==3.6.0
 libclang==18.1.1
 limits==5.5.0
 Markdown==3.8.2
