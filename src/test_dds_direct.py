@@ -5,7 +5,8 @@ Reproduces the exact DDS call from the successful claim test.
 """
 
 import sys
-sys.path.append('/home/ben/ben/src')
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ddsolver.ddsolver import DDSolver
 import deck52

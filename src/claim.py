@@ -397,11 +397,12 @@ class Claimer:
                     print(f"CLAIM DEBUG: Using next_to_play_board_pos: {next_to_play_board_pos}")
                 max_min_tricks = self._get_max_min_tricks(strain_i, next_to_play_board_pos, sampled_hands_pbn, current_trick)
             else:
-                # Fallback for backward compatibility (should not happen with new gameapi)
-                dds_player_i = claimer_board_pos if claimer_board_pos is not None else player_i
+                # No fallback - this parameter is required for correct operation
                 if self.verbose:
-                    print(f"CLAIM DEBUG: Fallback - using claimer position: {dds_player_i}")
-                max_min_tricks = self._get_max_min_tricks(strain_i, dds_player_i, sampled_hands_pbn, current_trick)
+                    print(f"ERROR: next_to_play_board_pos is None - cannot determine next player position")
+                    print(f"  This should not happen with updated gameapi.py")
+                # Return conservative result: claim 0 tricks (reject claim)
+                return 0, n_samples
             if self.verbose:
                 print(f"CLAIM DEBUG: DDS returned max_min_tricks = {max_min_tricks}")
         except Exception as e:
