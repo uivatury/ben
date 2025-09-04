@@ -231,6 +231,15 @@ class BotBid:
 
         self.my_bid_no = self.get_bid_number_for_player_to_bid(auction)
         candidates, passout = self.get_bid_candidates(auction)
+        
+        # Ultimate fallback: ensure candidates is never empty before any processing
+        using_fallback = False
+        if not candidates:
+            if self.verbose:
+                print("No candidates found - adding fallback Pass bid")
+            candidates.append(CandidateBid(bid="PASS", insta_score=-1, alert=False, who="FALLBACK", explanation="No valid candidates found"))
+            using_fallback = True
+        
         quality = 1
         hands_np = None
         samples = []
@@ -240,6 +249,12 @@ class BotBid:
         generate_samples = not self.sampler.no_samples_when_no_search and self.get_min_candidate_score(self.my_bid_no) != -1
         generate_samples = generate_samples or (binary.get_number_of_bids(auction) > 4 and self.models.check_final_contract)
         generate_samples = generate_samples or len(candidates) > 1
+        
+        # Don't waste time sampling when using fallback candidate
+        if using_fallback:
+            generate_samples = False
+            if self.verbose:
+                print("Skipping sampling - using fallback candidate")
 
         if generate_samples:
             if self.verbose:
