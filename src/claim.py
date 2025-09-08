@@ -355,18 +355,42 @@ class Claimer:
             for i in range(n_samples):
                 np.random.shuffle(hidden_cards)
                 
-                n_cards = len(hidden_cards) // 2
+                # Create initial hands for the hidden hand positions  
+                hidden_hand_0 = _hand_from_cards(52, [])  # Start empty
+                hidden_hand_1 = _hand_from_cards(52, [])  # Start empty
                 
-                # Create hands for the hidden hand positions  
-                hidden_hand_0 = _hand_from_cards(52, hidden_cards[:n_cards])
-                hidden_hand_1 = _hand_from_cards(52, hidden_cards[n_cards:])
-                
-                # Add current_trick cards to hidden hands too
+                # Add current_trick cards to hidden hands first
                 hidden_hands_dict = {
                     hidden_hand_indexes[0]: hidden_hand_0,
                     hidden_hand_indexes[1]: hidden_hand_1
                 }
                 assign_current_trick_cards(hidden_hands_dict, label="hidden", first_sample_only=True, sample_i=i)
+                
+                # Now count cards in each hidden hand after current trick assignment
+                current_count_0 = np.sum(hidden_hand_0)
+                current_count_1 = np.sum(hidden_hand_1)
+                
+                # Distribute hidden cards to balance the hands
+                if len(hidden_cards) % 2 == 1:
+                    # Odd number of hidden cards - give extra card to hand with fewer cards
+                    if current_count_0 <= current_count_1:
+                        # Give odd card to hand 0, then split remaining evenly
+                        hand_0_cards = hidden_cards[:1 + len(hidden_cards)//2]
+                        hand_1_cards = hidden_cards[1 + len(hidden_cards)//2:]
+                    else:
+                        # Give odd card to hand 1, then split remaining evenly  
+                        hand_0_cards = hidden_cards[:len(hidden_cards)//2]
+                        hand_1_cards = hidden_cards[len(hidden_cards)//2:]
+                else:
+                    # Even number of hidden cards - split evenly
+                    hand_0_cards = hidden_cards[:len(hidden_cards)//2]
+                    hand_1_cards = hidden_cards[len(hidden_cards)//2:]
+                
+                # Add the distributed cards to the hands (on top of current trick cards)
+                for card in hand_0_cards:
+                    hidden_hand_0[card] = 1
+                for card in hand_1_cards:
+                    hidden_hand_1[card] = 1
                 
                 # ONLY assign to hidden positions, keep known hands unchanged
                 hands[hidden_hand_indexes[0]] = deck52.deal_to_str(hidden_hand_0)
